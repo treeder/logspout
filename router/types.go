@@ -7,8 +7,6 @@ import (
 	"path"
 	"strings"
 	"time"
-
-	"github.com/fsouza/go-dockerclient"
 )
 
 // HttpHandler is an extension type for adding HTTP endpoints
@@ -25,6 +23,11 @@ type AdapterTransport interface {
 // LogAdapter is a streamed log
 type LogAdapter interface {
 	Stream(logstream chan *Message)
+}
+
+type LogHandler interface {
+	// HandleLine return false to stop the rest of the handlers from executing
+	HandleLine(*Message) bool
 }
 
 // Job is a thing to be done
@@ -67,7 +70,8 @@ type Route struct {
 	Address       string            `json:"address"`
 	Options       map[string]string `json:"options,omitempty"`
 	adapter       LogAdapter
-	closed	      bool
+	closed        bool
+	Handler       LogHandler // either LogAdapter or LogHandler allowed, not both
 	closer        chan bool
 	closerRcv     <-chan bool // used instead of closer when set
 }
