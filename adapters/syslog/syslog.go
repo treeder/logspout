@@ -8,6 +8,7 @@ import (
 	"log"
 	"log/syslog"
 	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -67,6 +68,56 @@ func getHostname() string {
 }
 
 // NewSyslogAdapter returnas a configured syslog.Adapter
+func NewSyslogHandler(syslogUrl string) (router.LogHandler, error) {
+	url, err := url.Parse(syslogUrl)
+	if err != nil {
+		return nil, err
+	}
+	transport, found := router.AdapterTransports.Lookup(router.TransportProtocol(url.Scheme, "udp"))
+	if !found {
+		return nil, errors.New("bad transport: " + url.Scheme)
+	}
+	conn, err := transport.Dial(syslogUrl, map[string]string{})
+	if err != nil {
+		return nil, err
+	}
+
+	format := getopt("SYSLOG_FORMAT", "rfc5424")
+	priority := getopt("SYSLOG_PRIORITY", "{{.Priority}}")
+	hostname := getopt("SYSLOG_HOSTNAME", "{{.Container.Config.Hostname}}")
+	pid := getopt("SYSLOG_PID", "{{.Container.State.Pid}}")
+	tag := getopt("SYSLOG_TAG", "{{.ContainerName}}")
+	structuredData := getopt("SYSLOG_STRUCTURED_DATA", "")
+	data := getopt("SYSLOG_DATA", "{{.Data}}")
+
+	if structuredData == "" {
+		structuredData = "-"
+	} else {
+		structuredData = fmt.Sprintf("[%s]", structuredData)
+	}
+
+	var tmplStr string
+	switch format {
+	case "rfc5424":
+		tmplStr = fmt.Sprintf("<%s>1 {{.Timestamp}} %s %s %s - %s %s\n",
+			priority, hostname, tag, pid, structuredData, data)
+	case "rfc3164":
+		tmplStr = fmt.Sprintf("<%s>{{.Timestamp}} %s %s[%s]: %s\n",
+			priority, hostname, tag, pid, data)
+	default:
+		return nil, errors.New("unsupported syslog format: " + format)
+	}
+	tmpl, err := template.New("syslog").Parse(tmplStr)
+	if err != nil {
+		return nil, err
+	}
+	return &SyslogAdapter{
+		conn:      conn,
+		tmpl:      tmpl,
+		transport: transport,
+	}, nil
+}
+
 func NewSyslogAdapter(route *router.Route) (router.LogAdapter, error) {
 	transport, found := router.AdapterTransports.Lookup(route.AdapterTransport("udp"))
 	if !found {
