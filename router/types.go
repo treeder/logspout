@@ -7,8 +7,6 @@ import (
 	"path"
 	"strings"
 	"time"
-
-	"github.com/fsouza/go-dockerclient"
 )
 
 // HttpHandler is an extension type for adding HTTP endpoints
@@ -25,6 +23,12 @@ type AdapterTransport interface {
 // LogAdapter is a streamed log
 type LogAdapter interface {
 	Stream(logstream chan *Message)
+}
+
+// LogHandler is another way of handling log messages, rather than using stream/channel, LogHandler's will receive each line.
+type LogHandler interface {
+	// HandleLine return false to stop the rest of the handlers from executing
+	HandleLine(*Message) bool
 }
 
 // Job is a thing to be done
@@ -67,7 +71,8 @@ type Route struct {
 	Address       string            `json:"address"`
 	Options       map[string]string `json:"options,omitempty"`
 	adapter       LogAdapter
-	closed	      bool
+	closed        bool
+	Handler       LogHandler // either LogAdapter or LogHandler allowed, not both
 	closer        chan bool
 	closerRcv     <-chan bool // used instead of closer when set
 }
@@ -79,7 +84,12 @@ func (r *Route) AdapterType() string {
 
 // AdapterTransport returns a route's adapter transport string
 func (r *Route) AdapterTransport(dfault string) string {
-	parts := strings.Split(r.Adapter, "+")
+	return TransportProtocol(r.Adapter, dfault)
+}
+
+// So it can be used outside of a Route
+func TransportProtocol(scheme, dfault string) string {
+	parts := strings.Split(scheme, "+")
 	if len(parts) > 1 {
 		return parts[1]
 	}
